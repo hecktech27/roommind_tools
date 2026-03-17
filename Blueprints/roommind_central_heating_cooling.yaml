@@ -1,1 +1,139 @@
-#
+blueprint:
+  name: "Roommind: Central heating & cooling controller"
+  description: >
+    This blueprint enables the wonderful [RoomMind](https://github.com/snazzybean/roommind) integration to work with central heatin / cooling systems.
+    The blueprint monitors state changes of one or more of RoomMinds mode entities and triggers user-definable actions based on heating, cooling, or idle state.
+    State changes of monitored entities cancel ongoing runs of this blueprint and restart the logic used by this blueprint. 
+    This ensures that only the latest combination of states is processed.
+
+    Logic:
+    - All entities "idle"             → Idle Actions
+    - Only heating detected           → Heating Actions
+    - Only cooling detected           → Cooling Actions
+    - Heating AND cooling detected    → Heating & Cooling Actions
+  domain: automation
+  author: hecktech27
+  source_url: https://github.com/hecktech27/roommind_tools/blob/main/Blueprints/roommind_central_heating_cooling.yaml
+
+  input:
+
+    trigger_section:
+      name: "Trigger"
+      description: >
+        Entities whose state changes will trigger the controller.
+        Select RoomMinds Mode entities for each room that is controlled by your central heating/cooling system and that should be managed by RoomMind
+      collapsed: false
+      input:
+        mode_entities:
+          name: Mode Entities
+          description: >
+            One or more entities using the states "idle", "heating", and/or "cooling".
+          selector:
+            entity:
+              multiple: true
+              filter:
+                - integration: roommind
+                  domain: sensor
+
+    idle_section:
+      name: "💤 Idle"
+      description: Executed when all mode entities report "idle".
+      collapsed: true
+      input:
+        idle_actions:
+          name: Idle Actions
+          description: >
+            Typical use case: shut down heating and cooling entirely.
+          default: []
+          selector:
+            action: {}
+
+    heating_section:
+      name: "🔥 Heating"
+      description: Executed when heating is detected but no cooling.
+      collapsed: true
+      input:
+        heating_actions:
+          name: Heating Actions
+          description: >
+            At least one entity reports "heating", none reports "cooling".
+            Typical use case: activate heating, deactivate cooling.
+          default: []
+          selector:
+            action: {}
+
+    cooling_section:
+      name: "❄️ Cooling"
+      description: Executed when cooling is detected but no heating.
+      collapsed: true
+      input:
+        cooling_actions:
+          name: Cooling Actions
+          description: >
+            At least one entity reports "cooling", none reports "heating".
+            Typical use case: activate cooling, deactivate heating.
+          default: []
+          selector:
+            action: {}
+
+    heating_cooling_section:
+      name: "🔥❄️ Heating & Cooling"
+      description: Takes priority – executed when heating AND cooling are detected simultaneously.
+      collapsed: true
+      input:
+        heating_cooling_actions:
+          name: Heating & Cooling Actions
+          description: >
+            At least one entity reports "heating" and at least one reports "cooling" at the same time.
+            This case takes priority over the individual heating and cooling actions.
+            Typical use case: define a conflict strategy, e.g. switch to a neutral mode.
+          default: []
+          selector:
+            action: {}
+
+variables:
+  mode_entities: !input mode_entities
+
+trigger:
+  - platform: state
+    entity_id: !input mode_entities
+
+condition: []
+
+action:
+  - variables:
+      all_idle: >
+        {{ expand(mode_entities) | map(attribute='state') | list | select('ne', 'idle') | list | count == 0 }}
+      any_heating: >
+        {{ expand(mode_entities) | map(attribute='state') | list | select('eq', 'heating') | list | count > 0 }}
+      any_cooling: >
+        {{ expand(mode_entities) | map(attribute='state') | list | select('eq', 'cooling') | list | count > 0 }}
+
+  - choose:
+      # 💤 All idle
+      - conditions:
+          - condition: template
+            value_template: "{{ all_idle }}"
+        sequence: !input idle_actions
+
+      # 🔥❄️ Heating AND cooling simultaneously → takes priority over individual cases
+      - conditions:
+          - condition: template
+            value_template: "{{ any_heating and any_cooling }}"
+        sequence: !input heating_cooling_actions
+
+      # 🔥 Heating only
+      - conditions:
+          - condition: template
+            value_template: "{{ any_heating }}"
+        sequence: !input heating_actions
+
+      # ❄️ Cooling only
+      - conditions:
+          - condition: template
+            value_template: "{{ any_cooling }}"
+        sequence: !input cooling_actions
+
+# restart: any ongoing execution is cancelled when a new trigger fires.
+# This ensures only the most recent state change leads to an actual execution.
+mode: restart
