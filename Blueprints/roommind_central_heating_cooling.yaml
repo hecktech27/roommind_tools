@@ -28,6 +28,7 @@ blueprint:
           name: Mode Entities
           description: >
             One or more entities using the states "idle", "heating", and/or "cooling".
+            Select all mode entities for rooms controlled by your central heating / cooling system(in most cases probably all rooms) for this blueprint to work as intended.
           selector:
             entity:
               multiple: true
